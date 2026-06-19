@@ -186,7 +186,14 @@ var croptool = {
         var imageID = getParameterByName('imageID') || getParameterByName('iiif-content');
         
         /* get metadata about requested image from IIIF server */
-        var info_url = imageID + '/info.json';
+        var info_url;
+        if (imageID && imageID.endsWith('/info.json')) {
+            info_url = imageID;
+        } else if (imageID && imageID.endsWith('/')) {
+            info_url = imageID + 'info.json';
+        } else {
+            info_url = imageID + '/info.json';
+        }
         var result = {
         };
         
