@@ -104,7 +104,7 @@ var croptool = {
         '                        <input type="radio" name="img_width" id="th" value="150"/> 150px </label>' +
         '                    <label><span  class="textbox">' +
         '                        &#8212; <strong> other:&#8196;</strong>' +
-        '                        <input type="text" name="img_width_other" id="ot" value="" data-toggle="tooltip" data-placement="top" title="enter an integer or &quot;full&quot;"/>' +
+        '                        <input type="text" name="img_width_other" id="ot" value="" data-toggle="tooltip" data-placement="top" title="enter an integer, &quot;full&quot; (v1/v2), or &quot;max&quot; (v3)"/>' +
         '                    </span></label>' +
         '                    <span id="label_regionSquare" class="hidden">' +
         '                        <br />' +
@@ -157,7 +157,7 @@ var croptool = {
         '                        <input type="radio" name="img_quality" id="qual_default" value="default" checked="checked"/> default </label>' +
         '                    <label class="radio-inline">' +
         '                        <input type="radio" name="img_quality" id="qual_colour" value="color"/> colour </label>' +
-        '                    <label class="radio-inline hidden" id="label_greyscale">' +
+        '                    <label class="radio-inline hidden" id="label_grey">' +
         '                        <input type="radio" name="img_quality" id="qual_grey" value="grey"/> greyscale </label>' +
         '                    <label class="radio-inline hidden" id="label_bitonal">' +
         '                        <input type="radio" name="img_quality" id="qual_bitonal" value="bitonal"/> bitonal </label>' +
@@ -183,7 +183,7 @@ var croptool = {
         /* inject HTML */
         $("#cropping_tool").append(page_intro).append(image_selection).append(image_display).append(image_navbox);
         
-        var imageID = getParameterByName('imageID');
+        var imageID = getParameterByName('imageID') || getParameterByName('iiif-content');
         
         /* get metadata about requested image from IIIF server */
         var info_url = imageID + '/info.json';
@@ -288,73 +288,85 @@ var croptool = {
             var iiif_format = '.jpg';
             var iiif_quality = 'default';
             var sizeAboveFull = false;
-            
+            var iiif_version = 2;
+            var iiif_upscaling = false;
+
             /* API v. 1.0 and 1.1 use 'native' rather than 'default' */
-            
-            if (result[ '@context'] !== undefined) {
-                if (result[ '@context'].match(/image\-api\/1\.1/) || result[ '@context'].match(/image\-api\/1\.0/)) {
+
+            if (result['@context'] !== undefined) {
+                var ctx = Array.isArray(result['@context']) ? result['@context'].join(' ') : result['@context'];
+                if (ctx.match(/image\-api\/1\.1/) || ctx.match(/image\-api\/1\.0/)) {
                     iiif_quality = 'native';
+                } else if (ctx.match(/image\-api\/3/)) {
+                    iiif_version = 3;
                 }
             } else if (result.qualities !== undefined) {
                 iiif_quality = 'native';
             }
-            
-            if (result.profile.constructor == Array) {
+
+            function applyMaxWidth(maxWidth) {
+                width = maxWidth;
+                if (width < 1280) { $('#label_1280').addClass("hidden"); }
+                if (width < 1024) { $('#label_1024').addClass("hidden"); }
+                if (width < 800)  { $('#label_800').addClass("hidden"); }
+                if (width < 400)  { $('#label_400').addClass("hidden"); }
+            }
+
+            /* v2: profile is an array; v3: profile is a string with extra* top-level fields */
+            if (result.profile !== undefined && Array.isArray(result.profile)) {
                 $.each(result.profile, function (index, value) {
                     if (value.formats !== undefined) {
                         $.each(value.formats, function (item, format) {
-                            var attr_id = '#label_' + format;
-                            $(attr_id).removeClass("hidden");
+                            $('#label_' + format).removeClass("hidden");
                         });
                     }
                     if (value.qualities !== undefined) {
                         $.each(value.qualities, function (item, quality) {
-                            var attr_id = '#label_' + quality;
-                            $(attr_id).removeClass("hidden");
+                            /* v2 uses 'grey'; map to the label id */
+                            var labelId = (quality === 'grey') ? 'grey' : quality;
+                            $('#label_' + labelId).removeClass("hidden");
                         });
                     }
                     if (value.maxWidth !== undefined) {
-                        /* treat the maxWidth value as the actual width */
-                        width = value.maxWidth;
-                        if (width > 1280) {
-                            var attr_id = 'label_' + '1280';
-                            $(attr_id).addClass("hidden");
-                        }
-                        if (width > 1024) {
-                            var attr_id = 'label_' + '1024';
-                            $(attr_id).addClass("hidden");
-                        }
-                        if (width > 800) {
-                            var attr_id = 'label_' + '800';
-                            $(attr_id).addClass("hidden");
-                        }
-                        if (width > 400) {
-                            var attr_id = 'label_' + '400';
-                            $(attr_id).addClass("hidden");
-                        }
+                        applyMaxWidth(value.maxWidth);
                     }
                     if (value.supports !== undefined) {
                         $.each(value.supports, function (item, supported) {
-                            if (supported == 'mirroring') {
-                                var attr_id = '#label_' + supported;
-                                $(attr_id).removeClass("hidden");
-                            } else if (supported == 'rotationArbitrary') {
-                                var attr_id = '#label_' + supported;
-                                $(attr_id).removeClass("hidden");
-                            } else if (supported == 'regionSquare') {
-                                var attr_id = '#label_' + supported;
-                                $(attr_id).removeClass("hidden");
-                            } else if (supported == 'sizeAboveFull') {
+                            if (supported === 'mirroring' || supported === 'rotationArbitrary' || supported === 'regionSquare') {
+                                $('#label_' + supported).removeClass("hidden");
+                            } else if (supported === 'sizeAboveFull') {
                                 sizeAboveFull = true;
                             }
-                            /*
-                             * other properties to support:
-                             *     rotationBy90s
-                             *     regionSquare
-                             */
                         });
                     }
                 });
+            } else if (iiif_version === 3) {
+                /* IIIF Image API v3: extra capabilities are top-level fields */
+                if (result.extraFormats !== undefined) {
+                    $.each(result.extraFormats, function (item, format) {
+                        $('#label_' + format).removeClass("hidden");
+                    });
+                }
+                if (result.extraQualities !== undefined) {
+                    $.each(result.extraQualities, function (item, quality) {
+                        /* v3 uses 'gray'; map to the existing 'grey' label */
+                        var labelId = (quality === 'gray') ? 'grey' : quality;
+                        $('#label_' + labelId).removeClass("hidden");
+                    });
+                }
+                if (result.maxWidth !== undefined) {
+                    applyMaxWidth(result.maxWidth);
+                }
+                if (result.extraFeatures !== undefined) {
+                    $.each(result.extraFeatures, function (item, feature) {
+                        if (feature === 'mirroring' || feature === 'rotationArbitrary' || feature === 'regionSquare') {
+                            $('#label_' + feature).removeClass("hidden");
+                        } else if (feature === 'upscaling') {
+                            sizeAboveFull = true;
+                            iiif_upscaling = true;
+                        }
+                    });
+                }
             }
             
             var iiif_width;
@@ -411,15 +423,21 @@ var croptool = {
             });
             
             $("input:text[name=img_width_other]").change(function () {
-                if ($(this).val() == 'full') {
-                    iiif_width = 'full';
+                var val = $(this).val();
+                if (val === 'full' || val === 'max') {
+                    /* v3 uses 'max'; v1/v2 use 'full' — accept either and normalise */
+                    iiif_width = (iiif_version === 3) ? 'max' : 'full';
                 } else {
-                    if ($(this).val() > width && sizeAboveFull == false) {
+                    var intVal = parseInt(val);
+                    if (intVal > width && !sizeAboveFull) {
                         alert("Maximum allowed width is " + width + " pixels");
                         $("input[name='img_width_other']").val(width);
                         iiif_width = width + ',';
+                    } else if (iiif_upscaling && intVal > width) {
+                        /* v3 upscaling: prefix with ^ to request server upscale */
+                        iiif_width = '^' + val + ',';
                     } else {
-                        iiif_width = $(this).val() + ',';
+                        iiif_width = val + ',';
                     }
                 }
             });
